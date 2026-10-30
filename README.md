@@ -49,7 +49,7 @@
 
 ## 安装与授权配置
 
-本分支适配 **DSH 0.2.1-rc.2／rc.3、Node 24**，其他版本没有兼容性声明。合并发布前，应从审核的源码打包，并先在临时 `DSH_HOME` 验证；本次未发布 npm 包。
+本分支适配 **DSH 0.2.1-rc.2／rc.3／rc.5、Node 24**，其他版本没有兼容性声明。合并发布前，应从审核的源码打包，并先在临时 `DSH_HOME` 验证；本次未发布 npm 包。
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts

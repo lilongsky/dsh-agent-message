@@ -77,11 +77,11 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
     "@deepseek-ai/schemastery": "~3.18.5",
-    "@deepseek-ai/dsh-llm": "0.2.1-rc.2 || 0.2.1-rc.3",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2 || 0.2.1-rc.3",
-    "@deepseek-ai/dsh-settings": "0.2.1-rc.2 || 0.2.1-rc.3",
-    "@deepseek-ai/dsh-session-query": "0.2.1-rc.2 || 0.2.1-rc.3",
-    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2 || 0.2.1-rc.3"
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5",
+    "@deepseek-ai/dsh-session-query": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
@@ -101,7 +101,7 @@
   },
   "engines": {
     "node": ">=24 <25",
-    "dsh": "0.2.1-rc.2 || 0.2.1-rc.3"
+    "dsh": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.5"
   },
   "license": "MIT"
 }

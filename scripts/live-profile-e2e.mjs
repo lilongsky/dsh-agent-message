@@ -48,7 +48,7 @@ async function stop(child) {
 
 try {
   const dshVersion = (await command(dsh, ['--version'])).trim()
-  assert.match(dshVersion, /0\.2\.1-rc\.[23]/, 'This candidate targets DSH 0.2.1-rc.2 or rc.3')
+  assert.match(dshVersion, /0\.2\.1-rc\.(?:2|3|5)(?![0-9])/, 'This candidate targets DSH 0.2.1-rc.2, rc.3 or rc.5')
   const packed = JSON.parse(await command(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['pack', '--pack-destination', root, '--json']))
   const tarball = packed.filename ?? packed.tarballPath
   assert.equal(typeof tarball, 'string', 'pnpm pack must return its tarball path')

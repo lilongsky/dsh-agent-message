@@ -49,7 +49,7 @@ Current relay messages are displayed as visible Agent message cards; clicking th
 
 ## Install and authorize
 
-This branch targets **DSH 0.2.1-rc.2/rc.3 and Node 24**. Other versions are not claimed as compatible. Before merge/publication, pack reviewed source and validate in a temporary `DSH_HOME`; this contribution publishes no npm release.
+This branch targets **DSH 0.2.1-rc.2/rc.3/rc.5 and Node 24**. Other versions are not claimed as compatible. Before merge/publication, pack reviewed source and validate in a temporary `DSH_HOME`; this contribution publishes no npm release.
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
