@@ -17,9 +17,9 @@ const expectedFiles = [
 ]
 
 test('npm 发布包只包含完整的运行时文件', () => {
-  const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-  const output = execFileSync(command, ['pack', '--dry-run', '--json'], { encoding: 'utf8' })
-  const { files } = JSON.parse(output)
+  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const output = execFileSync(command, ['pack', '--dry-run', '--json', '--ignore-scripts'], { encoding: 'utf8' })
+  const [{ files }] = JSON.parse(output)
 
   assert.deepEqual(files.map(({ path }) => path).sort(), expectedFiles)
 })

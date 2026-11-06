@@ -4,7 +4,7 @@
 >
 > 初稿：2026-08-14
 >
-> 本次修订：2026-10-18，DSH 0.2.1-rc.2
+> 本次修订：2026-11-07，DSH 0.2.2-rc.1
 >
 > 范围：同一 DeepSeek Harness 进程内，独立 Session 之间的引用、消息投递与传输诊断。
 
@@ -36,7 +36,7 @@
 - 使用 `followup`、`steer` 或 `inject` 投递一条原生消息；
 - 在消息中保留发送方 Session，使接收方能按需回复；
 - 提供可选的传输状态查询；
-- 通过用户配置的稳定 Session 配对、分别相同且非空的原始项目 header.cwd 与当前 workingDirectory，以及有限原生日志消息预算限制通信；
+- 默认允许原始项目 header.cwd 与当前 workingDirectory 分别相同且非空的独立 Session 通信；显式配对模式可另行限制稳定 Session 配对及原生日志消息预算；
 - 在 Plugin Client 中显示 relay 消息来源和发送方跳转入口。
 
 ### 2.2 当前不提供
@@ -122,7 +122,7 @@ A 根据用户完整句子判断动作：
 Host 负责：
 
 1. 从工具执行上下文派生真实 `senderSessionId`；
-2. 校验调用方和目标是用户配置的稳定 Session 配对、原始项目 header.cwd 和当前 workingDirectory 分别相同且非空、未归档且不是自身或真实子代理；
+2. 校验调用方和目标的原始项目 header.cwd 和当前 workingDirectory 分别相同且非空、未归档且不是自身或真实子代理；显式配对模式再校验配置中的稳定 Session 配对；
 3. 校验所选投递模式当前可用；
 4. 使用 Harness `createUserMessage()` 创建原生消息；
 5. 通过公开 Agent API 投递；
@@ -297,9 +297,13 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 都校验真实 sender/target，不能查询其他调用方的投递。异步查询、恢复 setup、
 发布 commit 和原生投递前均复查身份、归档、cwd 和取消信号。
 
-三个工具默认没有权限；`allowedPairs` 明确授予两条稳定 ID、协作 id 和
+三个工具默认使用 `accessMode: workspace`，同目录的合格会话无需配对即可发现、
+按完整 Session ID 投递及查询自己的回执。旧 `allowedPairs` 不限制此模式，
+消息不带协作 id，也没有按任务累计的消息预算；每对会话双向每分钟 10 条的限速保留。
+
+显式设置 `accessMode: paired` 时，`allowedPairs` 授予两条稳定 ID、协作 id 和
 `maxMessages`。消息预算按双方自己的原生 Inbox 插入事件统计，双向总计且
-跨重启保留；同一配对的预算查询与投递串行。模型不能配置或清零预算。
+跨重启保留；同一对会话的投递串行，配对模式的预算查询也在串行区间内。模型不能配置或清零预算。
 
 显示偏好 `showTechnicalDetails` 是 volatile Config 字段，Host 读取其公开
 `.get()` 值，Client 使用 `configForms` 和 `plugins.bundle.config`。表单只暴露该显示字段，

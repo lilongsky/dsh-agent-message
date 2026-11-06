@@ -8,7 +8,7 @@ import { apply } from '../lib/index.js'
 
 const pair = { id: 'review-run-1', sessions: ['session-a', 'session-b'], maxMessages: 20 }
 
-function fixture({ pairs = [pair], cwdB = '/repo', existing, query: overrides = {}, resume } = {}) {
+function fixture({ accessMode = 'paired', pairs = [pair], cwdB = '/repo', existing, query: overrides = {}, resume } = {}) {
   const state = existing ?? { live: new Map(), snapshots: new Map(), workspace: { archivedSessionIds: [] } }
   const tools = new Map()
   const cleanups = []
@@ -53,19 +53,68 @@ function fixture({ pairs = [pair], cwdB = '/repo', existing, query: overrides = 
     get(name) { return { sessionQuery: query, workspaceRegistry: state.workspace, sessionProjections: { stateOf: (session) => session.workingDirectory ?? session.header.cwd } }[name] },
     effect(fn) { cleanups.push(fn()); }, on() {},
   }
-  apply(ctx, { allowedPairs: pairs })
+  apply(ctx, { ...(accessMode === 'default' ? {} : { accessMode }), allowedPairs: pairs })
   const a = state.live.get('session-a')
   return { state, ctx, tools, a, query, get resumes() { return resumes }, async dispose() { for (const cleanup of cleanups.reverse()) await cleanup?.() } }
 }
 
 const send = (f, to = 'session-b', exec = { agent: f.a }) => f.tools.get('send_agent_message').execute({ to, content: 'Synthetic coordination message' }, exec)
 
-test('no configured pair means default deny across all three host tools', async () => {
+test('explicit paired mode denies across all three host tools without a configured pair', async () => {
   const f = fixture({ pairs: [] })
   assert.deepEqual(await f.tools.get('list_peer_agents').execute({}, { agent: f.a }), [])
   await assert.rejects(send(f), /无权/)
   await assert.rejects(f.tools.get('check_delivery').execute({ to: 'session-b' }, { agent: f.a }), /无权/)
   assert.equal(f.state.snapshots.get('session-b').events.length, 0)
+})
+
+test('default workspace mode lists and sends by full Session ID without pairs, including a cold target', async () => {
+  let target
+  const f = fixture({ accessMode: 'default', pairs: [], async resume(options) {
+    assert.equal(options.resumeSessionId, 'session-b')
+    f.state.live.set(target.id, target)
+    return { agent: target, async dispose() {} }
+  } })
+  target = f.state.live.get('session-b')
+  f.state.live.delete(target.id)
+  const peers = await f.tools.get('list_peer_agents').execute({}, { agent: f.a })
+  assert.deepEqual(peers.map((row) => row.id).sort(), ['session-b', 'session-c'])
+  assert.equal(peers.find((row) => row.id === target.id).status, 'offline')
+  const message = await send(f)
+  assert.equal(message.state, 'accepted')
+  assert.equal(f.resumes, 1)
+  const reply = await send(f, f.a.id, { agent: target })
+  assert.equal(reply.state, 'accepted')
+  assert.equal((await f.tools.get('check_delivery').execute({ to: target.id, messageId: message.messageId }, { agent: f.a })).entries[0].state, 'pending')
+  assert.equal(f.state.snapshots.get(target.id).events[0].data.inserted[0].source.coordinationId, undefined)
+  await f.dispose()
+})
+
+test('default workspace access ignores legacy test pairs and their lifetime budgets across restart', async () => {
+  const options = { accessMode: 'default', pairs: [{ ...pair, maxMessages: 1 }] }
+  const f = fixture(options)
+  assert.equal((await send(f, 'session-c')).state, 'accepted')
+  assert.equal((await send(f)).state, 'accepted')
+  assert.equal((await send(f)).state, 'accepted')
+  const restarted = fixture({ ...options, existing: f.state })
+  assert.equal((await send(restarted)).state, 'accepted')
+})
+
+test('default workspace access retains project, directory, archive, subagent and caller boundaries', async () => {
+  for (const boundary of ['project', 'directory', 'archive', 'subagent', 'self', 'missing-directory']) {
+    for (const cold of [false, true]) {
+      const f = fixture({ accessMode: 'default', pairs: [], cwdB: boundary === 'project' ? '/other' : '/repo' })
+      const target = f.state.live.get('session-b')
+      if (boundary === 'directory') target.session.workingDirectory = f.state.snapshots.get(target.id).workingDirectory = '/other'
+      if (boundary === 'archive') f.state.workspace.archivedSessionIds.push(target.id)
+      if (boundary === 'subagent') target.session.header.origin = 'subagent'
+      if (boundary === 'missing-directory') f.ctx.get = ((get) => (name) => name === 'sessionProjections' ? { stateOf() {} } : get(name))(f.ctx.get)
+      if (cold) f.state.live.delete(target.id)
+      await assert.rejects(send(f, boundary === 'self' ? f.a.id : target.id), /无权|自己/)
+      assert.equal(f.resumes, 0)
+      assert.equal(f.state.snapshots.get(target.id).events.length, 0)
+    }
+  }
 })
 
 test('an unrelated same-workspace session cannot discover, send or inspect an A/B pair', async () => {

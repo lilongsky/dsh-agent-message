@@ -49,7 +49,7 @@ test('native workingDirectory survives JSONL cold reads while immutable header.c
       tools: { register: (tool) => tools.set(tool.name, tool) },
       get: (name) => name === 'workspaceRegistry' ? { archivedSessionIds: [] } : ctx.get(name),
       effect(fn) { cleanups.push(fn()) }, on() {},
-    }, { allowedPairs: [{ id: 'native-directory', sessions: [a.id, b.id], maxMessages: 2 }] })
+    })
     const send = () => tools.get('send_agent_message').execute({ to: b.id, content: 'must not cross current directories' }, { agent: a })
     assert.deepEqual((await tools.get('list_peer_agents').execute({}, { agent: a })).map((row) => row.id), [b.id])
     const changed = await ctx.workingDirectory.set(b, moved)

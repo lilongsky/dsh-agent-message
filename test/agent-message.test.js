@@ -84,7 +84,7 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
     },
     on: (name, listener) => listeners.set(name, listener),
   }
-  const liveConfig = { allowedPairs, ...config }
+  const liveConfig = { accessMode: 'paired', allowedPairs, ...config }
   apply(ctx, liveConfig)
   return {
     tools,

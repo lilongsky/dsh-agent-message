@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 
 assert.equal(Number(process.versions.node.split('.')[0]), 24, 'Run this acceptance with Node 24')
 const dsh = process.argv[2] ?? 'dsh'
+const accessMode = process.argv[3] ?? 'workspace'
+assert.ok(['workspace', 'paired'].includes(accessMode), 'Choose workspace or paired acceptance')
 assert.ok(!/^https?:/.test(dsh), 'Pass a DSH CLI, not a server URL')
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = await mkdtemp(join(tmpdir(), 'dsh-agent-message-'))
@@ -48,8 +50,8 @@ async function stop(child) {
 
 try {
   const dshVersion = (await command(dsh, ['--version'])).trim()
-  assert.match(dshVersion, /0\.2\.1-rc\.(?:2|3|5)(?![0-9])/, 'This candidate targets DSH 0.2.1-rc.2, rc.3 or rc.5')
-  const packed = JSON.parse(await command(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['pack', '--pack-destination', root, '--json']))
+  assert.equal(dshVersion, '0.2.2-rc.1', 'This candidate targets DSH 0.2.2-rc.1')
+  const [packed] = JSON.parse(await command(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--pack-destination', root, '--json', '--ignore-scripts']))
   const tarball = packed.filename ?? packed.tarballPath
   assert.equal(typeof tarball, 'string', 'pnpm pack must return its tarball path')
   await command(dsh, ['plugin', '--profile', 'web', 'add', resolve(root, tarball), '--ignore-scripts'])
@@ -60,8 +62,8 @@ try {
       { id: 'session-title-llm', disabled: true },
       { id: 'hmr', disabled: true },
       { id: 'session-persistence-jsonl', config: { root: join(home, 'sessions'), compression: 'none' } },
-      { id: 'agent-message', config: { allowedPairs } },
-      { insert: [{ id: 'agent-message-host-fixture', name: resolve(repo, 'scripts/host-profile-fixture.mjs'), config: { ...ids, cwd, otherCwd, runId, output: outputs[index], phase } }] },
+      { id: 'agent-message', config: { ...(accessMode === 'paired' ? { accessMode } : {}), allowedPairs } },
+      { insert: [{ id: 'agent-message-host-fixture', name: resolve(repo, 'scripts/host-profile-fixture.mjs'), config: { ...ids, cwd, otherCwd, runId, accessMode, output: outputs[index], phase } }] },
     ]
     await writeFile(join(home, 'profiles/web/cordis.patch.yml'), JSON.stringify(patch, null, 2) + '\n')
     const child = spawn(dsh, ['web', '--no-open', '--host', '127.0.0.1', '--port', '0'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -86,7 +88,7 @@ try {
       await writeFile(join(root, phase + '.log'), redact(logs))
     }
   }
-  const report = { ok: true, dsh, dshVersion, node: process.versions.node, home, root, ids, runId, onlineModelRequests: false, results }
+  const report = { ok: true, dsh, dshVersion, node: process.versions.node, home, root, ids, runId, accessMode, onlineModelRequests: false, results }
   await writeFile(join(root, 'acceptance.json'), JSON.stringify(report, null, 2) + '\n')
   process.stdout.write(JSON.stringify(report, null, 2) + '\n')
 } catch (error) {

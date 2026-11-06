@@ -12,7 +12,7 @@ English | [中文](./README.md)
 
 In DeepSeek Harness, a single process hosts multiple Agent sessions at once. This plugin equips each session with three tools so they can "message" each other:
 
-- Before sending, first **list authorized, same-workspace independent sessions** (non-archived, excluding actual subagents, including offline sessions that have not been reopened), and find the target by its title;
+- Before sending, **list same-workspace independent sessions** (non-archived, excluding actual subagents, including offline sessions that have not been reopened), and find the target by its title; a full Session ID can also be used directly, without pairing;
 - Once found, **deliver the message to the target session** — ordinary messages always enter a new independent turn; if the target is offline (not loaded since the last process restart), the plugin resumes it through Harness's public API, delivers the message, and keeps the handle loaded for later communication until plugin teardown;
 - When needed, **query the delivery status of a message on demand** (queued / claimed / discarded / unknown), with the target runtime status reported separately for supervision scenarios.
 
@@ -22,7 +22,7 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 
 | Capability | Description |
 |---|---|
-| `list_peer_agents` | List authorized, same-workspace **sendable independent sessions**: non-archived, excluding actual subagents while retaining ordinary forks; returns id, title, working directory, and runtime status |
+| `list_peer_agents` | By default, list same-workspace **sendable independent sessions**: non-archived, excluding actual subagents while retaining ordinary forks; returns id, title, working directory, and runtime status |
 | `send_agent_message` | Send a message to a session id; `followup` creates an independent turn by default and offline targets are resumed automatically; explicit modes are `followup`, `inject`, and `steer` |
 | `check_delivery` | Query receipts on demand (pending/claimed/discarded/unknown); a successful send first returns accepted, while pre-admission failure is a tool error; explicit message ids remain queryable after restart |
 | Native Harness `@` session reference | Reuse Harness's structured Session Reference directly. The current Agent receives the stable Session ID plus a bounded, read-only snapshot marked as untrusted. Referencing alone does not send a message or wake the target |
@@ -49,7 +49,7 @@ Current relay messages are displayed as visible Agent message cards; clicking th
 
 ## Install and authorize
 
-This branch targets **DSH 0.2.1-rc.2/rc.3/rc.5 and Node 24**. Other versions are not claimed as compatible. Before merge/publication, pack reviewed source and validate in a temporary `DSH_HOME`; this contribution publishes no npm release.
+This branch targets **DSH 0.2.2-rc.1 and Node 24.9 or later within 24.x**. Other versions are not claimed as compatible. Before merge/publication, pack reviewed source and validate in a temporary `DSH_HOME`; this contribution publishes no npm release.
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -60,18 +60,23 @@ dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-
 
 When replacing `dsh-cross-session-agent`, remove it first with `dsh plugin --profile desktop remove dsh-cross-session-agent --config.ignore-scripts=true`, then install this package; the three tool names overlap. Preserve existing pair configuration and rename its patch entry from `cross-session-agent` to `agent-message`, leaving other profile settings intact.
 
-Installation registers the three tools, but **default cross-session authority is empty**. Configure full stable IDs in that profile's `cordis.patch.yml`:
+After installation, **same-workspace communication works by default** (`accessMode: workspace`). No per-session pairing or lifetime task-message budget is required. Legacy `allowedPairs` test entries do not restrict this mode. A full Session ID directly addresses the target while preserving workspace and session eligibility checks.
+
+Members must be distinct, non-archived ordinary root/fork Sessions. Both their original project (`header.cwd`) and current `workingDirectory` must separately match and be nonempty. Current directories come from the public Harness projection; missing projections deny access. Changing different projects to the same directory does not grant new communication access. Receiving Sessions keep their own Harness approvals and permissions. The existing bidirectional limit of ten messages per sixty seconds still applies.
+
+To restrict communication to specific Sessions, explicitly select paired mode in that profile's `cordis.patch.yml`:
 
 ```yaml
 - id: agent-message
   config:
+    accessMode: paired
     allowedPairs:
       - id: review-task-001
         sessions: [session-FULL-A-ID, session-FULL-B-ID]
         maxMessages: 20
 ```
 
-Members must be distinct, non-archived ordinary root/fork Sessions. Both their original project (`header.cwd`) and current `workingDirectory` must separately match and be nonempty. Current directories come from the public Harness projection; missing projections deny access. Changing different projects to the same directory does not grant new communication access. The coordination id accepts 1–64 ASCII letters, digits, underscores or hyphens; pairs and ids must be unique. `maxMessages` is a bidirectional message count, not a fix-round count: default 20, range 1–100. Native Inbox logs retain the budget across restarts. A user configures a new id for a new task and removes the pair when done; agents cannot change configuration or reset budgets. Receiving Sessions keep their own Harness approvals and permissions.
+`allowedPairs` and lifetime budgets apply only in `accessMode: paired`; with no pairs, this mode lists no peers. The coordination id accepts 1–64 ASCII letters, digits, underscores or hyphens; pairs and ids must be unique. `maxMessages` is a bidirectional message count, not a fix-round count: default 20, range 1–100. Native Inbox logs retain the budget across restarts. A user configures a new id for a new task and removes the pair when done; agents cannot change configuration or reset budgets.
 
 The sidebar **…** menu copies its own row's identity without opening the session. When Harness registers its native **Copy Session ID** action, the plugin skips its duplicate; while the native action is absent or unloaded, the plugin provides **Copy session ID**. The header button remains. Native mentions and copied IDs grant no messaging authority.
 
@@ -79,7 +84,7 @@ Delivery display preferences now use volatile `showTechnicalDetails` in the plug
 
 ## Usage
 
-1. Give the paired A/B Sessions explicit implementation/review and fix/reply duties, then type `@` in session A's composer and choose the target session from Harness's native candidate menu;
+1. Give same-workspace A/B Sessions explicit implementation/review and fix/reply duties, then type `@` in session A's composer and choose the target session from Harness's native candidate menu, or provide its full Session ID;
 2. Harness gives A a bounded, read-only, untrusted snapshot of that Session, but does not message or wake B. A calls `send_agent_message` only when the current request or an orchestration responsibility already granted by the user explicitly requires cross-session communication. For example, `@B tell it to stop after opening the draft PR` sends, while `@B analyze its latest conversation result` only uses the referenced snapshot;
 3. For an explicit forwarding request, A only delivers and reports whether the message was accepted or failed. It must not execute the forwarded task itself or ask B for an extra acknowledgement. B sends a message to `senderSessionId` only when the body explicitly asks it to return business content;
 4. You can still ask the Agent to call `list_peer_agents` and send directly with a full session id;
@@ -134,7 +139,7 @@ node scripts/live-profile-e2e.mjs /path/to/dsh
 pnpm peers check
 ```
 
-`test:web-smoke` requires a local `dsh` installation and a configured Web Profile. It checks startup, plugin composition, and HTTP reachability only; see the [0.2.1 validation report](./docs/validation-0.2.1-rc.2.md) for current evidence. The native runner uses a temporary profile, actual Agent/tool/log services and an offline deterministic model to verify references, handoffs, receipts, settings and restart budgets. It does not establish arbitrary online-model behavior.
+`test:web-smoke` requires a local `dsh` installation and a configured Web Profile. It checks startup, plugin composition, and HTTP reachability only; see the [0.2.1 validation report](./docs/validation-0.2.1-rc.2.md) for historical evidence. The native runner uses a temporary profile, actual Agent/tool/log services and an offline deterministic model. By default it verifies unpaired same-workspace discovery, full-ID delivery, handoffs, receipts, settings and restart. Add `paired` after the DSH CLI argument to verify explicit pairing and restart budgets. It does not establish arbitrary online-model behavior.
 
 Historical validation (DSH 0.2.0-rc.2, separate from the current 0.2.1 temporary-profile run): this fork replaced the other plugin in that desktop. On the current online Flash route, native `@` and full Session ID requests each completed review → fix → reply → independent re-review. Both implementations went from 9 pass / 1 fail to 10 pass / 0 fail with unchanged acceptance files; all four relays were claimed and all ten peer-tool calls succeeded. Both reference-only controls made no sends and did not wake A. After sending remediation requirements, end the current turn so A's business reply can trigger the next review turn.
 

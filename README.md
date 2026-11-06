@@ -12,7 +12,7 @@
 
 在 DeepSeek Harness 里，一个进程会同时挂着多个 Agent 会话。本插件给每个会话装上三个工具，让它们能互相"发消息"：
 
-- 发消息前，先**列出已授权配对、同工作目录的独立会话**（未归档、排除真实子代理，含离线未打开的），按标题找到目标；
+- 发消息前，可先**列出同工作目录的独立会话**（未归档、排除真实子代理，含离线未打开的），按标题找到目标；已有完整 Session ID 时可直接发送，无需预先配对；
 - 找到后，**把消息投递到目标会话**——普通消息统一进入独立的新 turn；目标离线（进程重启后还没打开）时，插件通过 Harness 公开接口恢复会话、投递，并保持加载供后续通信，插件卸载时再释放 handle；
 - 需要时，可以**按需查询**某条消息的送达状态（排队中/已认领/被丢弃/未知），并单独查看目标是否正在运行，供监督场景使用。
 
@@ -22,7 +22,7 @@
 
 | 能力 | 说明 |
 |---|---|
-| `list_peer_agents` | 列出已授权配对、同工作目录的**可发送**独立会话：未归档、排除真实子代理；普通 fork 保留。返回 id、标题、工作目录和运行状态 |
+| `list_peer_agents` | 默认列出同工作目录的**可发送**独立会话：未归档、排除真实子代理；普通 fork 保留。返回 id、标题、工作目录和运行状态 |
 | `send_agent_message` | 给指定会话 ID 发消息；默认使用 `followup` 创建独立的新 turn，离线时自动恢复后投递；显式支持 `followup`、`inject`、`steer` |
 | `check_delivery` | 按需查询消息回执（pending/claimed/discarded/unknown）；发送成功时先返回 accepted，接纳前失败由工具错误表示；指定消息 ID 时支持重启后恢复查询 |
 | Harness 原生 `@` 会话引用 | 直接复用 Harness 的结构化 Session Reference；选择后当前 Agent 获得稳定 Session ID 和一份有界、只读、标记为不可信的会话快照。引用本身不会发送消息或唤醒目标 |
@@ -49,7 +49,7 @@
 
 ## 安装与授权配置
 
-本分支适配 **DSH 0.2.1-rc.2／rc.3／rc.5、Node 24**，其他版本没有兼容性声明。合并发布前，应从审核的源码打包，并先在临时 `DSH_HOME` 验证；本次未发布 npm 包。
+本分支适配 **DSH 0.2.2-rc.1、Node 24.9 及以上的 24.x**，其他版本没有兼容性声明。合并发布前，应从审核的源码打包，并先在临时 `DSH_HOME` 验证；本次未发布 npm 包。
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -60,18 +60,23 @@ dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-
 
 若替换 `dsh-cross-session-agent`，先用 `dsh plugin --profile desktop remove dsh-cross-session-agent --config.ignore-scripts=true` 卸载它，再安装本包；两者的三个工具名称重合。保留已有配对配置，将对应 patch 条目的 `id` 从 `cross-session-agent` 改为 `agent-message`，不要改其他 profile 设置。
 
-安装自注册三个工具，但**默认没有跨会话权限**。在该 profile 的 `cordis.patch.yml` 中配置真实会话的完整 ID：
+安装后**默认同工作目录互通**（`accessMode: workspace`），无需逐次添加 Session ID，也没有按任务累计的消息总数上限。旧的 `allowedPairs` 测试配置在此模式下不限制通信。完整 Session ID 可以直接寻址目标，但仍须满足同工作目录等边界。
+
+两个会话必须是不同、未归档的普通 root/fork，且原始项目 `header.cwd` 与当前 `workingDirectory` 均须分别相同、非空。当前目录从 Harness 的公开投影读取；缺失投影时关闭权限。仅把不同项目切到同一目录不会新增通信权限。接收方保留自己的 Harness 工具审批与权限。原有的双向每分钟 10 条限速继续生效。
+
+需要限制为指定会话时，可在该 profile 的 `cordis.patch.yml` 中显式选择配对模式：
 
 ```yaml
 - id: agent-message
   config:
+    accessMode: paired
     allowedPairs:
       - id: review-task-001
         sessions: [session-FULL-A-ID, session-FULL-B-ID]
         maxMessages: 20
 ```
 
-两个会话必须是不同、未归档的普通 root/fork，且原始项目 `header.cwd` 与当前 `workingDirectory` 均须分别相同、非空。当前目录从 Harness 的公开投影读取；缺失投影时关闭权限。仅把不同项目切到同一目录不会新增通信权限。`id` 允许 1–64 个英文字母、数字、下划线或连字符；配对和协作 id 必须唯一。`maxMessages` 是双向消息总数，默认 20，范围 1–100，不是整改轮次。预算由两条会话自己的原生 Inbox 日志计算，重启不会清零。新任务由用户配置新 id，任务结束时移除配对；模型不能改配置或重置预算。接收方保留自己的 Harness 工具审批与权限。
+仅在 `accessMode: paired` 下，`allowedPairs` 和消息总预算生效；未配置配对时列表为空。`id` 允许 1–64 个英文字母、数字、下划线或连字符；配对和协作 id 必须唯一。`maxMessages` 是双向消息总数，默认 20，范围 1–100，不是整改轮次。预算由两条会话自己的原生 Inbox 日志计算，重启不会清零。新任务由用户配置新 id，任务结束时移除配对；模型不能改配置或重置预算。
 
 侧栏“…”菜单复制该行的 ID，无需打开会话。检测到 Harness 原生“复制 Session ID”入口时，插件不再重复注册；原生入口尚未注册或被卸载时，插件提供“复制会话 ID”。会话顶部仍保留复制按钮。原生 `@` 或复制 ID 都不授予通信权限。
 
@@ -79,7 +84,7 @@ dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-
 
 ## 使用
 
-1. 给已配对的 A、B 明确实施/审查、整改/回传职责，再在会话 A 的输入框中键入 `@`，从 Harness 原生候选菜单中选择目标会话；
+1. 给同工作目录的 A、B 明确实施/审查、整改/回传职责，再在会话 A 的输入框中键入 `@`，从 Harness 原生候选菜单中选择目标会话，或直接提供完整 Session ID；
 2. Harness 会把该 Session 的有界、只读、不可信快照提供给 A，但不会向 B 发消息或唤醒 B。只有当前请求或用户已授予的编排职责明确要求跨会话传递信息时，A 才调用 `send_agent_message`。例如 `@B 告诉他最后提交 PR draft 就停止` 会发送；`@B 帮我分析他最新的对话结果` 只使用引用快照；
 3. 显式要求转告时，A 只负责投递并报告“已接受”或失败，不代为执行被转发的任务，也不要求 B 额外回复“收到”；如果正文明确要求 B 把业务内容返回 A，B 才向 `senderSessionId` 发送消息；
 4. 也可以让 Agent 调 `list_peer_agents`，再用完整会话 ID 直接发送；
@@ -134,7 +139,7 @@ node scripts/live-profile-e2e.mjs /path/to/dsh
 pnpm peers check
 ```
 
-`test:web-smoke` 需要本机已安装 `dsh` 并配置 Web Profile，它只验证启动、插件组合和 HTTP 可达性；当前 0.2.1 验收记录见 [`docs/validation-0.2.1-rc.2.md`](./docs/validation-0.2.1-rc.2.md)。`live-profile-e2e` 只创建和操作临时 profile，使用真实 Native Agent/工具/日志服务和无网络的确定性模型，验证原生引用、往返、回执、设置与重启预算；它不证明任意在线模型一定遵循提示词。
+`test:web-smoke` 需要本机已安装 `dsh` 并配置 Web Profile，它只验证启动、插件组合和 HTTP 可达性；当前 0.2.1 验收记录见 [`docs/validation-0.2.1-rc.2.md`](./docs/validation-0.2.1-rc.2.md)。`live-profile-e2e` 只创建和操作临时 profile，使用真实 Native Agent/工具/日志服务和无网络的确定性模型，默认验证同目录免配对发现、完整 ID 投递、往返、回执、设置与重启；追加参数 `paired` 可验证指定配对及重启后的预算限制。它不证明任意在线模型一定遵循提示词。
 
 历史验证（DSH 0.2.0-rc.2，与本次 0.2.1 临时 profile 验收分开记录）：本机曾用本 fork 替换旧插件，并在当前在线 Flash 路由分别验证原生 `@` 与完整 Session ID 的审查→整改→回传→复审。两份初稿各从 9/1 变为 10/0，原验收文件未改，4 条往返消息全部被领取，10 次跨会话工具调用均成功；两种纯参考请求都没有发送消息或唤醒 A。发送整改要求后可结束当前轮次，由 A 的业务回传触发新的复审轮次。
 

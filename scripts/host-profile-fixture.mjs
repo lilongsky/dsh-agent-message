@@ -10,7 +10,8 @@ export const name = 'agent-message-agent-host-fixture'
 export const inject = ['llm', 'agents', 'tools', 'sessionQuery', 'sessionPersistence', 'sessionProjections', 'workingDirectory', 'workspaceRegistry', 'sessionReferenceResolver', 'settings']
 
 export function apply(ctx, config) {
-  const { a, b, c, d, fork, cwd, otherCwd, runId, output, phase = 'initial' } = config
+  const { a, b, c, d, fork, cwd, otherCwd, runId, accessMode, output, phase = 'initial' } = config
+  const paired = accessMode === 'paired'
   assert.ok(cwd && otherCwd && output && runId, 'fixture needs explicit disposable paths and identities')
   let modelCalls = 0
   const modelInputs = []
@@ -57,11 +58,19 @@ export function apply(ctx, config) {
         handles.push(handle)
         const before = await read(b)
         assert.equal(ctx.agents.get(b), undefined)
-        await assert.rejects(execute('send_agent_message', { to: b, content: 'must not exceed durable budget' }, handle.agent), /预算已用尽/)
-        assert.equal(ctx.agents.get(b), undefined)
-        assert.equal((await read(b)).events.length, before.events.length)
-        assert.equal(modelCalls, 0)
-        check('process restart retained the A/B budget from native JSONL logs; exhausted cold B was neither resumed nor sent a message')
+        if (paired) {
+          await assert.rejects(execute('send_agent_message', { to: b, content: 'must not exceed durable budget' }, handle.agent), /预算已用尽/)
+          assert.equal(ctx.agents.get(b), undefined)
+          assert.equal((await read(b)).events.length, before.events.length)
+          assert.equal(modelCalls, 0)
+          check('process restart retained the paired A/B budget from native JSONL logs; exhausted cold B was neither resumed nor sent a message')
+        } else {
+          const result = await execute('send_agent_message', { to: b, content: 'workspace delivery after restart' }, handle.agent)
+          assert.equal(result.state, 'accepted')
+          await ctx.agents.get(b).whenIdle()
+          assert.equal((await execute('check_delivery', { to: b, messageId: result.messageId }, handle.agent)).entries[0].state, 'claimed')
+          check('default workspace access resumed cold B after a real process restart despite the exhausted legacy test-pair budget')
+        }
       } else {
         const create = async (id, workdir = cwd, extra = {}) => {
           const handle = await ctx.agents.create({ sessionId: id, meta: { cwd: workdir }, agentOptions: { provider: 'agent-message-fixture', model: 'fixture' }, ...extra })
@@ -112,7 +121,7 @@ export function apply(ctx, config) {
         assert.equal(delivered.length, 3)
         assert.deepEqual(delivered.map((event) => event.data.source.senderSessionId).sort(), [a, a, b].sort())
         for (const event of delivered) {
-          assert.equal(event.data.source.coordinationId, runId)
+          assert.equal(event.data.source.coordinationId, paired ? runId : undefined)
           assert.notEqual(event.data.source.kind, 'user')
           assert.match(event.data.content[0].text, /<dsh-agent-message>/)
         }
@@ -153,11 +162,18 @@ export function apply(ctx, config) {
         check('native volatile Config form edits changed delivery details live without remounting tools or exposing allowedPairs; messageId stayed visible')
 
         const listed = await execute('list_peer_agents', {}, ha.agent)
-        assert.deepEqual(listed.map((row) => row.id), [b])
+        assert.deepEqual(listed.map((row) => row.id).sort(), (paired ? [b] : [b, d]).sort())
         await assert.rejects(execute('send_agent_message', { to: c, content: 'cross-workspace denial' }, ha.agent), /无权/)
-        await assert.rejects(execute('send_agent_message', { to: d, content: 'unpaired denial' }, ha.agent), /无权/)
-        await assert.rejects(execute('check_delivery', { to: d, messageId: delivered[0].data.id }, ha.agent), /无权/)
-        check('real workspace registry and native session directory denied cross-cwd and unpaired targets')
+        if (paired) {
+          await assert.rejects(execute('send_agent_message', { to: d, content: 'unpaired denial' }, ha.agent), /无权/)
+          await assert.rejects(execute('check_delivery', { to: d, messageId: delivered[0].data.id }, ha.agent), /无权/)
+        } else {
+          const direct = await execute('send_agent_message', { to: d, content: 'unpaired full-ID delivery' }, ha.agent)
+          assert.equal(direct.state, 'accepted')
+          await ctx.agents.get(d).whenIdle()
+          assert.equal((await execute('check_delivery', { to: d, messageId: direct.messageId }, ha.agent)).entries[0].state, 'claimed')
+        }
+        check(paired ? 'explicit paired mode denied cross-cwd and unpaired targets' : 'default workspace discovery and full-ID delivery included an unpaired session while denying cross-cwd targets')
 
         const forkHandle = await create(fork, cwd, { seed: bSnapshot.events, inheritedEventCount: bSnapshot.events.length, meta: { cwd, parentSession: b, isSeeded: true } })
         const bDelivery = delivered.find((event) => event.data.source.targetSessionId === b)
@@ -178,7 +194,7 @@ export function apply(ctx, config) {
           }
           await assert.rejects(execute('send_agent_message', { to: fork, content: 'must not cross current directories' }, ha.agent), /无权/)
           await assert.rejects(execute('check_delivery', { to: fork, messageId: bDelivery.data.id }, ha.agent), /无权/)
-          assert.deepEqual((await execute('list_peer_agents', {}, ha.agent)).map((row) => row.id), [b])
+          assert.deepEqual((await execute('list_peer_agents', {}, ha.agent)).map((row) => row.id).sort(), (paired ? [b] : [b, d]).sort())
           assert.equal(relayCount(await read(fork)), beforeDirectoryDenial)
           if (cold) assert.equal(ctx.agents.get(fork), undefined)
         }
@@ -193,8 +209,14 @@ export function apply(ctx, config) {
         await assert.rejects(execute('send_agent_message', { to: fork, content: 'must not arrive after archive' }, ha.agent), /无权/)
         check('native profile rejected an aborted call and a session archived through WorkspaceRegistry without adding a message')
 
-        await assert.rejects(execute('send_agent_message', { to: b, content: 'must not trigger a fourth handoff' }, ha.agent), /预算已用尽/)
-        check('the three-message coordination budget stopped any fourth relay')
+        if (paired) {
+          await assert.rejects(execute('send_agent_message', { to: b, content: 'must not trigger a fourth handoff' }, ha.agent), /预算已用尽/)
+          check('the explicit paired-mode three-message coordination budget stopped any fourth relay')
+        } else {
+          assert.equal((await execute('send_agent_message', { to: b, content: 'workspace fourth delivery' }, ha.agent)).state, 'accepted')
+          await ctx.agents.get(b).whenIdle()
+          check('default workspace delivery ignored the legacy three-message test budget')
+        }
       }
       await ctx.sessionPersistence.flush()
       report.ok = true
